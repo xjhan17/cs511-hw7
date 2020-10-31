@@ -2,95 +2,87 @@ from z3 import *
 import sys
 import numpy as np
 import ast
+import json
 
-
+# get input from either input .txt file or script
+# format in input file: [[objective terms], [subjective terms], ...]
+# e.g: [[[1, [[0, 1]]], [1, [[0, 2]]]], [[1, [[0, 1], [1, 2]]], [2, [[0, 2]]], [-3, [[0, 1]]], [-1, []]], [[-1, [[0, 1], [1, 2]]], [-2, [[0, 2]]], [3, [[0, 1]]], [1, []]]]
+# format in script: same as described in hw 7 p5
+# e.g: [ \
+#      [ [1, [[0, 1]]], [1, [[0, 2]]]], \
+#      [ [1, [[0, 1], [1, 2]]], [2, [[0, 2]]], [-3, [[0, 1]]], [-1, []]], \
+#      [ [-1, [[0, 1], [1, 2]]], [-2, [[0, 2]]], [3, [[0, 1]]], [1, []]] \
+#      ]
 
 
 if len(sys.argv) > 1:
+    # file = open(sys.argv[1], 'r')
+    # line = file.readline()
+    # inputlist.ast.literal_eval(line)
 	file = sys.argv[1]
 	with open(file, 'r') as fi:
 		inputline = fi.readline()
-		L = ast.literal_eval(line)
+		inputlist = ast.literal_eval(inputline)
 else:
-	L = [ \
-        [ [1, [[0, 1]]], [1, [[0, 2]]]], \
-     	[[1, [[0, 1], [1, 2]]], [2, [[0, 2]]], [-3, [[0, 1]]], [-1, []]], \
-     	[[-1, [[0, 1], [1, 2]]], [-2, [[0, 2]]], [3, [[0, 1]]], [1, []]] \
-        ]
+    inputlist = [ \
+                [ [1, [[0, 1]]], [1, [[0, 2]]]], \
+     	        [ [1, [[0, 1], [1, 2]]], [2, [[0, 2]]], [-3, [[0, 1]]], [-1, []]], \
+     	        [ [-1, [[0, 1], [1, 2]]], [-2, [[0, 2]]], [3, [[0, 1]]], [1, []]] \
+                ]
+
+def main():
+    s = Optimize()
+    variables = []
+    count = []
+    function = objectiveFunction(variables, count)
+    constraints = PBConstraint(variables, count)
+    s.add(constraints)
+    s.minimize(function)
+    if s.check() == sat:
+        print('True: PB-constraints are satisfiable, with (0,1) assignments as below: ')
+        model = s.model()
+        for a in model:
+            print('variable: ' + str(a) + ' value assignment: ' + str(model[a]))
+    else:
+        print('False: PB-constraints are NOT satisfiable')
 
 
-variables = []
-count = []
 
-def objectiveFunction():
-    formula = -1
-    for term in L[0]:
-        sub_formula = term[0]
-        for var_lst in term[1]:
-            if var_lst[0] == 0:
-                var = Int('x%s' % var_lst[1])
-            else:
-                var = Int('-x%s' % var_lst[1])
-            if var not in variables:
-                variables.append(var)
-            if var_lst[1] not in count:
-                count.append(var_lst[1])
-            sub_formula *= var
-        if formula == -1:
-            formula = sub_formula
-        else:
-            formula += sub_formula
-    return formula
+def objectiveFunction(variables, count):
+    function = 0
+    for terms in inputlist[0]:
+        subFunction = terms[0]
+        for lists in terms[1]:
+            variable = Int('x%s' % lists[1]) if lists[0] == 0 else Int('-x%s' % lists[1])
+            variables.append(variable) if variable not in variables else variables
+            count.append(lists[1]) if lists[1] not in count else count
+            subFunction *= variable
+        function += subFunction
+    return function
 
-def PBConstraint():
+def PBConstraint(variables, count):
     constraints = []
-    for j in range(1, len(L)):
+    for i in range(1, len(inputlist)):
         constraint = -1
-        for cur_lst in L[j]:
-            sub_constraint = cur_lst[0]
-            for var_lst in cur_lst[1]:
-                if var_lst[0] == 0:
-                    var = Int('x%s' % var_lst[1])
-                else:
-                    var = Int('-x%s' % var_lst[1])
-                if var not in variables:
-                    variables.append(var)
-                if var_lst[1] not in count:
-                    count.append(var_lst[1])
-                sub_constraint *= var
-            if constraint == -1:
-                constraint = sub_constraint
-            else:
-                constraint += sub_constraint
-        constraints.append(constraint <= 0)
+        for currentList in inputlist[i]:
+            subConstraint = currentList[0]
+            for lists in currentList[1]:
+                variable = Int('x%s' % lists[1]) if lists[0] == 0 else Int('-x%s' % lists[1])
+                variables.append(variable) if variable not in variables else variables
+                count.append(lists[1]) if lists[1] not in count else count
+                subConstraint = subConstraint * variable
+            constraint = subConstraint if constraint == -1 else constraint + subConstraint
+        constraints.append(constraint<=0)
     
     # setting up constraints: 
     # 1. variables can only assume values 0 or 1
     # 2. negation of x, Bar x = 1-x
     for i in count:
-        variableConstraint = Or(Int('x'+str(i)) == 1, Int('x'+str(i)) == 0)
-        constraints.append(variableConstraint)
-        variableConstraint = Or(Int('-x' + str(i)) == 1, Int('-x' + str(i)) == 0)
-        constraints.append(variableConstraint)
-
-        variableConstraint = Int('x'+str(i)) + Int('-x' + str(i)) == 1
-        constraints.append(variableConstraint)
+        constraints.append(Or(Int('x'+str(i)) == 1, Int('x'+str(i)) == 0))
+        constraints.append(Or(Int('-x' + str(i)) == 1, Int('-x' + str(i)) == 0))
+        constraints.append(Int('x'+str(i)) + Int('-x' + str(i)) == 1)
     return constraints
 
-
-def main():
-    s = Optimize()
-    formula = objectiveFunction()
-    constraints = PBConstraint()
-    s.add(constraints)
-    s.minimize(formula)
-    if s.check() == unsat:
-        print('false')
-    else:
-        print('true')
-        m = s.model()
-        sorted_model = sorted([(d, m[d]) for d in m], key=lambda x: str(x))
-        print(sorted_model)
 
 
 if __name__== "__main__":
